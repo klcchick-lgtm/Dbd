@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DBD Jewelry - Pro Studio</title>
+    <style>
+        :root { --gold: #D4AF37; --silver: #C0C0C0; --rose: #E5B299; --dark: #0a0a0a; }
+        body { font-family: 'Inter', sans-serif; background: var(--dark); color: white; margin: 0; overflow: hidden; touch-action: none; }
+        .app-container { display: flex; flex-direction: column; height: 100vh; }
+        
+        header { padding: 10px; background: #111; border-bottom: 1px solid #222; text-align: center; position: relative; }
+        h1 { color: var(--gold); margin: 0; font-size: 1.2rem; letter-spacing: 3px; }
+        .reset-view-btn { position: absolute; right: 10px; top: 10px; background: #333; color: white; border: 1px solid #444; padding: 5px 10px; border-radius: 4px; font-size: 10px; cursor: pointer; }
+        
+        .toolbar { display: flex; justify-content: center; gap: 8px; padding: 10px; background: #151515; flex-wrap: wrap; }
+        .swatch { width: 38px; height: 38px; border-radius: 50%; border: 2px solid #333; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; color: black; }
+        .swatch.active { border-color: white; transform: scale(1.1); box-shadow: 0 0 10px var(--gold); }
+        .s-gold { background: var(--gold); }
+        .s-silver { background: var(--silver); }
+        .s-rose { background: var(--rose); }
+        .s-ice { background: white; color: #004d40; }
+        .s-move { background: #444; color: white; border-radius: 8px; width: 55px; }
+
+        #viewport { flex-grow: 1; position: relative; overflow: hidden; background: #000; }
+        canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; background: #000; }
+
+        .footer { padding: 15px; background: #111; border-top: 1px solid #222; }
+        .brush-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        input[type=range] { flex-grow: 1; accent-color: var(--gold); }
+        
+        .btn-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        .clear-btn { background: #222; color: #666; }
+        .save-btn { background: var(--gold); color: black; }
+        
+        .status-bar { font-size: 9px; color: #444; text-align: center; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <header>
+        <h1>DBD JEWELRY</h1>
+        <button class="reset-view-btn" onclick="centerCanvas()">RESET VIEW</button>
+    </header>
+    
+    <div class="toolbar">
+        <div class="swatch s-gold active" onclick="setMode('draw', '#D4AF37', this)">GOLD</div>
+        <div class="swatch s-silver" onclick="setMode('draw', '#C0C0C0', this)">SILVER</div>
+        <div class="swatch s-rose" onclick="setMode('draw', '#E5B299', this)">ROSE</div>
+        <div class="swatch s-ice" onclick="setMode('ice', '', this)">ICE</div>
+        <div class="swatch s-move" onclick="setMode('move', '', this)">MOVE</div>
+    </div>
+
+    <div id="viewport">
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <div class="footer">
+        <div class="brush-row">
+            <span style="font-size: 10px; color: #888;">BRUSH SIZE</span>
+            <input type="range" id="brushSize" min="2" max="35" value="12">
+        </div>
+        <div class="btn-group">
+            <button class="clear-btn" onclick="resetCanvas()">Clear Canvas</button>
+            <button class="save-btn" onclick="saveDesign()">Save Design</button>
+        </div>
+        <div class="status-bar">Use MOVE mode to zoom with two fingers</div>
+    </div>
+</div>
+
+<script>
+    const viewport = document.getElementById('viewport');
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let mode = 'draw';
+    let activeColor = '#D4AF37';
+    let isDrawing = false;
+    
+    // Zoom/Pan State
+    let scale = 1;
+    let originX = 0;
+    let originY = 0;
+    let lastMouseX, lastMouseY;
+    let initialDist = null;
+
+    function init() {
+        canvas.width = 1200; 
+        canvas.height = 800;
+        resetCanvas();
+        centerCanvas();
+    }
+
+    function centerCanvas() {
+        const rect = viewport.getBoundingClientRect();
+        scale = rect.width / (canvas.width * 1.1); // Fit to screen
+        originX = (rect.width - canvas.width * scale) / 2;
+        originY = (rect.height - canvas.height * scale) / 2;
+        applyTransform();
+    }
+
+    function applyTransform() {
+        canvas.style.transform = `translate(${originX}px, ${originY}px) scale(${scale})`;
+    }
+
+    function drawOutlines() {
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 3;
+        // Top 12
+        for(let i=0; i<12; i++) {
+            ctx.beginPath();
+            ctx.roundRect(100 + (i*85), 180, 75, 120, [5, 5, 30, 30]);
+            ctx.stroke();
+        }
+        // Bottom 12
+        for(let i=0; i<12; i++) {
+            ctx.beginPath();
+            ctx.roundRect(100 + (i*85), 450, 75, 120, [30, 30, 5, 5]);
+            ctx.stroke();
+        }
+    }
+
+    function setMode(m, color, el) {
+        mode = m;
+        if(color) activeColor = color;
+        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    // Touch & Mouse Handling
+    const startAction = (e) => {
+        isDrawing = true;
+        const pos = e.touches ? e.touches[0] : e;
+        lastMouseX = pos.clientX;
+        lastMouseY = pos.clientY;
+        if(e.touches && e.touches.length === 2) initialDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+    };
+
+    const moveAction = (e) => {
+        if (!isDrawing) return;
+        const pos = e.touches ? e.touches[0] : e;
+
+        if (mode === 'move' || (e.touches && e.touches.length === 2)) {
+            // Zooming
+            if (e.touches && e.touches.length === 2) {
+                let dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                scale *= (dist / initialDist);
+                initialDist = dist;
+            } else {
+                // Panning
+                originX += (pos.clientX - lastMouseX);
+                originY += (pos.clientY - lastMouseY);
+            }
+            lastMouseX = pos.clientX;
+            lastMouseY = pos.clientY;
+            applyTransform();
+        } else {
+            paint(pos);
+            lastMouseX = pos.clientX;
+            lastMouseY = pos.clientY;
+        }
+    };
+
+    function paint(pos) {
+        const rect = viewport.getBoundingClientRect();
+        const x = (pos.clientX - rect.left - originX) / scale;
+        const y = (pos.clientY - rect.top - originY) / scale;
+        const size = document.getElementById('brushSize').value;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (mode === 'draw') {
+            ctx.lineWidth = size;
+            ctx.strokeStyle = activeColor;
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        } else if (mode === 'ice') {
+            for(let i=0; i<6; i++) {
+                ctx.fillStyle = `rgba(255,255,255,${Math.random()})`;
+                ctx.fillRect(x + (Math.random()-0.5)*size*2.5, y + (Math.random()-0.5)*size*2.5, 2, 2);
+            }
+        }
+    }
+
+    function resetCanvas() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+        drawOutlines();
+    }
+
+    function saveDesign() {
+        const link = document.createElement('a');
+        link.download = 'DBD-Custom-Grill.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+
+    viewport.addEventListener('mousedown', startAction);
+    window.addEventListener('mousemove', moveAction);
+    window.addEventListener('mouseup', () => { isDrawing = false; ctx.beginPath(); initialDist = null; });
+    
+    viewport.addEventListener('touchstart', (e) => { if(e.touches.length < 3) startAction(e); }, {passive:false});
+    viewport.addEventListener('touchmove', (e) => { e.preventDefault(); moveAction(e); }, {passive:false});
+    viewport.addEventListener('touchend', () => { isDrawing = false; ctx.beginPath(); initialDist = null; });
+
+    init();
+</script>
+</body>
+</html>
